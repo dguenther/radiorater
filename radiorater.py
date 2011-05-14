@@ -7,6 +7,7 @@
 ## future improvements:
 ## add songs to favorites
 ## request songs that haven't been voted for yet
+## use datetime instead of counting seconds to determine 8-hour periods
 ## lot of error-handling missing
 ##
 
@@ -57,14 +58,29 @@ br.addheaders = [('User-agent',USER_AGENT)]
 #br.set_debug_redirects(True)
 #br.set_debug_responses(True)
 
+def safeOpen(url, data=None):
+    ''' Retry opening URL until it is successful'''
+    success = False
+    while success == False:
+        try:
+            if data == None:
+                br.open(url)
+            else:
+                br.open(url,data)
+            success = True
+        except:
+            # if url opening fails, sleep for 3 seconds
+            success = False
+            time.sleep(3)
+
 def login():
     values = {'frompage':'index.php',
             'username':USERNAME,
             'password':PASSWORD
             }
     data = urllib.urlencode(values)
-    br.open("https://www.animenfo.com/radio/login.php", data)
-    # want to add some kind of handler if login fails
+    safeOpen("https://www.animenfo.com/radio/login.php", data)
+    # TODO: add some kind of handler if login fails
     cj.save()
 
 def getStdDev(rates):
@@ -95,48 +111,92 @@ def generateRating(currentRating, rates):
     else:
         return myRating
 
+def favoriteSong():
+    if (findMechanizeLinkById('np_delfav') == None):
+        favoriteLink = findMechanizeLinkById('np_addfav')
+        if (favoriteLink != None):
+            br.follow_link(favoriteLink)
+            br.back()
+            print "Added this song to favorites."
+        else:
+            print "Unable to favorite song - no favorites links detected."
+    else:
+        print "Already favorited this song."
+
 def formatOutput(text):
     data = ''.join(text.findAll(text=True)).partition('favourites')
     data = (data[0]+data[1]).strip()
     data = data.replace('\t\t\t\t','')
     return data
 
+def findMechanizeLinkById(desiredId):
+    for link in br.links():
+        attrDict = dict(link.attrs)
+        try:
+            if (attrDict['id'] == desiredId):
+                return link
+        # if KeyError is thrown while accessing id, link has no id, so skip
+        except KeyError:
+            pass
+    return None
+
+def findSoupItemById(desiredId):
+    soup = BeautifulSoup(br.response().read())
+    return soup.find(attrs={'id' : desiredId})
+
+def getSeconds():
+    span = findSoupItemById('np_timer')
+    return int(span['rel'])
+
+def songHasBeenRated():
+    rateText = findSoupItemById('rateform')
+    rateText = rateText.contents[4].strip()
+    return (rateText.find('Change your rating for this song:') != -1)
+
 while(True):
     totalSeconds = 0
     # 28800 seconds = 8 hours
     while(totalSeconds < 28800):
-        br.open(SONG_URL)
+        safeOpen(SONG_URL)
         try:
             br.select_form(nr=0)
         except:
             # if a form can't be selected, the browser isn't logged in
             login()
-            br.open(SONG_URL)
+            safeOpen(SONG_URL)
             br.select_form(nr=0)
-        soup = BeautifulSoup(br.response().read())
-        span = soup.find(attrs={'id' : 'np_timer'})
-        seconds = int(span['rel'])
+        seconds = getSeconds()
         if seconds <= 45:
             # if <= 30, rate and set timer to timer + ~10
-            rateText = soup.find(attrs={'id' : 'rateform'})
-            rateText = rateText.contents[4].strip()
+            soup = BeautifulSoup(br.response().read())
             items = soup.findAll('td', limit=2)
             text = items[1]
-            if (rateText.find('Change your rating for this song:') == -1):
+            if not (songHasBeenRated()):
                 rating = text.contents[12].strip().strip('Rating: ')
                 currentRating = rating.split('/', 1)[0]
                 rates = rating.split('rate', 1)[0]
                 rates = rates.split('(')[1]
 
                 myRating = generateRating(currentRating, rates)
+
                 print formatOutput(text)
                 print 'My Rating: %d' % myRating
-                
+
                 br['rating'] = [str(myRating)]
                 br.submit()
+
+                # if song is above rating threshold, add it to favorites
+                if (myRating >= 9):
+                    favoriteSong()
+
             else:
+                rating = br['rating'][0]
                 print formatOutput(text)
-                print 'Already rated this song: %s' % br['rating'][0]
+                print 'Already rated this song: %s' % rating
+                # if song is above rating threshold, add it to favorites
+                if (float(rating) >= 9):
+                    favoriteSong()
+
             seconds = seconds + random.randint(5,15)
             print 'Sleeping for %d seconds...' % (seconds)
             time.sleep(seconds)
