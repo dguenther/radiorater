@@ -125,10 +125,13 @@ def favoriteSong():
     else:
         print "Already favorited this song."
 
-def outputSongInfo():
+def getContent():
     soup = BeautifulSoup(br.response().read())
     items = soup.findAll('td', limit=2)
-    text = items[1]
+    return items[1]    
+
+def outputSongInfo():
+    text = getContent()
     data = ''.join(text.findAll(text=True)).partition('favourites')
     data = (data[0]+data[1]).strip()
     data = data.replace('\t\t\t\t','')
@@ -159,10 +162,10 @@ def songHasBeenRated():
     return (rateText.find('Change your rating for this song:') != -1)
 
 def canRate():
-    date = datetime.date.today()
+    now = datetime.datetime.now()
+    date = now.date()
     startDatetime = datetime.datetime.combine(date, datetime.time(START_HOUR,0,0))
     endDatetime = datetime.datetime.combine(date, datetime.time(END_HOUR,0,0))
-    now = datetime.datetime.now()
     return (startDatetime < now and endDatetime < now)
 
 def getSecondsUntilTomorrow():
@@ -188,8 +191,7 @@ while(True):
             # if <= 30, rate and set timer to timer + ~10
 
             if not (songHasBeenRated()):
-                items = soup.findAll('td', limit=2)
-                text = items[1]
+                text = getContent()
                 rating = text.contents[12].strip().strip('Rating: ')
                 currentRating = rating.split('/', 1)[0]
                 rates = rating.split('rate', 1)[0]
