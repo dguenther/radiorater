@@ -1,17 +1,16 @@
 ## 
 ## animenfo rating bot
 ##
-## Last Updated: 05-03-2011
-## Version 1
+## Last Updated: 05-14-2011
+## Version 2
 ##
 ## future improvements:
-## add songs to favorites
 ## request songs that haven't been voted for yet
-## use datetime instead of counting seconds to determine 8-hour periods
 ## lot of error-handling missing
 ##
 
 from BeautifulSoup import BeautifulSoup
+import datetime
 import ConfigParser
 import mechanize
 import urllib
@@ -20,8 +19,7 @@ import sys
 import time
 
 # read configuration file
-
-# need to implement creating configuration file if it doesn't exist
+# TODO: need to implement creating configuration file if it doesn't exist
 defaults = {'cookie-file':'cookies.dat',
             'song-url':'https://www.animenfo.com/radio/nowplaying.php?ajax=true&mod=playing',
             'user-agent':'Mozilla/5.0 (X11; U; Linux x86_64; en-US; rv:1.9.2.8) Gecko/20100723 Ubuntu/10.04 (lucid) Firefox/3.6.8'
@@ -38,6 +36,10 @@ PASSWORD = config.get('site-specific','password')
 if (USERNAME == '' or PASSWORD == ''):
     print 'Error: No username or password specified. Check settings.cfg'
     sys.exit(0)
+
+# constants not yet added to config file
+START_HOUR = 9
+END_HOUR = 17
 
 # initialize browser
 br = mechanize.Browser(factory=mechanize.RobustFactory())
@@ -123,7 +125,10 @@ def favoriteSong():
     else:
         print "Already favorited this song."
 
-def formatOutput(text):
+def outputSongInfo():
+    soup = BeautifulSoup(br.response().read())
+    items = soup.findAll('td', limit=2)
+    text = items[1]
     data = ''.join(text.findAll(text=True)).partition('favourites')
     data = (data[0]+data[1]).strip()
     data = data.replace('\t\t\t\t','')
@@ -153,10 +158,23 @@ def songHasBeenRated():
     rateText = rateText.contents[4].strip()
     return (rateText.find('Change your rating for this song:') != -1)
 
+def canRate():
+    date = datetime.date.today()
+    startDatetime = datetime.datetime.combine(date, datetime.time(START_HOUR,0,0))
+    endDatetime = datetime.datetime.combine(date, datetime.time(END_HOUR,0,0))
+    now = datetime.datetime.now()
+    return (startDatetime < now and endDatetime < now)
+
+def getSecondsUntilTomorrow():
+    currentDatetime = datetime.datetime.now()
+    date = currentDatetime.date()
+    date = date + datetime.timedelta(days=1)
+    tomorrowDatetime = datetime.datetime.combine(date, datetime.time(START_HOUR,0,0))
+    delta = tomorrowDatetime - currentDatetime
+    return delta.seconds
+
 while(True):
-    totalSeconds = 0
-    # 28800 seconds = 8 hours
-    while(totalSeconds < 28800):
+    while(canRate()):
         safeOpen(SONG_URL)
         try:
             br.select_form(nr=0)
@@ -168,10 +186,10 @@ while(True):
         seconds = getSeconds()
         if seconds <= 45:
             # if <= 30, rate and set timer to timer + ~10
-            soup = BeautifulSoup(br.response().read())
-            items = soup.findAll('td', limit=2)
-            text = items[1]
+
             if not (songHasBeenRated()):
+                items = soup.findAll('td', limit=2)
+                text = items[1]
                 rating = text.contents[12].strip().strip('Rating: ')
                 currentRating = rating.split('/', 1)[0]
                 rates = rating.split('rate', 1)[0]
@@ -179,7 +197,7 @@ while(True):
 
                 myRating = generateRating(currentRating, rates)
 
-                print formatOutput(text)
+                print outputSongInfo()
                 print 'My Rating: %d' % myRating
 
                 br['rating'] = [str(myRating)]
@@ -191,7 +209,7 @@ while(True):
 
             else:
                 rating = br['rating'][0]
-                print formatOutput(text)
+                print outputSongInfo()
                 print 'Already rated this song: %s' % rating
                 # if song is above rating threshold, add it to favorites
                 if (float(rating) >= 9):
@@ -205,9 +223,8 @@ while(True):
             seconds = seconds - random.randint(15,45)
             print 'Sleeping for %d seconds...' % (seconds)
             time.sleep(seconds)
-        totalSeconds += seconds
-    # 86400 seconds = 24 hours
-    sleepTime = 86400 - totalSeconds
+
+    sleepTime = getSecondsUntilTomorrow()
     print 'Sleeping for %d hours...' % (sleepTime / 3600)
     time.sleep(sleepTime)
 
