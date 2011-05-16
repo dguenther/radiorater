@@ -161,23 +161,22 @@ def songHasBeenRated():
     rateText = rateText.contents[4].strip()
     return (rateText.find('Change your rating for this song:') != -1)
 
-def canRate():
-    now = datetime.datetime.now()
-    date = now.date()
+def canRate(currentTime):
+    date = currentTime.date()
     startDatetime = datetime.datetime.combine(date, datetime.time(START_HOUR,0,0))
     endDatetime = datetime.datetime.combine(date, datetime.time(END_HOUR,0,0))
-    return (startDatetime < now and endDatetime < now)
+    return (startDatetime < currentTime and endDatetime > currentTime)
 
-def getSecondsUntilTomorrow():
-    currentDatetime = datetime.datetime.now()
-    date = currentDatetime.date()
+def getSecondsUntilTomorrow(currentTime):
+    date = currentTime.date()
     date = date + datetime.timedelta(days=1)
     tomorrowDatetime = datetime.datetime.combine(date, datetime.time(START_HOUR,0,0))
-    delta = tomorrowDatetime - currentDatetime
+    delta = tomorrowDatetime - currentTime
     return delta.seconds
 
 while(True):
-    while(canRate()):
+    currentTime = datetime.datetime.now()
+    while(canRate(currentTime)):
         safeOpen(SONG_URL)
         try:
             br.select_form(nr=0)
@@ -226,7 +225,7 @@ while(True):
             print 'Sleeping for %d seconds...' % (seconds)
             time.sleep(seconds)
 
-    sleepTime = getSecondsUntilTomorrow()
+    sleepTime = getSecondsUntilTomorrow(currentTime)
     print 'Sleeping for %d hours...' % (sleepTime / 3600)
     time.sleep(sleepTime)
 
