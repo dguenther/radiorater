@@ -1,7 +1,7 @@
 ## 
 ## animenfo rating bot
 ##
-## Last Updated: 08-03-2011
+## Last Updated: 09-09-2011
 ## Version 2
 ##
 ## future improvements:
@@ -47,8 +47,11 @@ br = mechanize.Browser(factory=mechanize.RobustFactory())
 # initialize cookie jar
 cj = mechanize.LWPCookieJar(COOKIE_FILE)
 try:
+    # reload cookies from saved file
+    # existing cookies in cj are overwritten to be safe
     cj.revert()
 except:
+    # if file doesn't exist, create a new one
     cj.save()
 br.set_cookiejar(cj)
 
@@ -63,7 +66,7 @@ br.addheaders = [('User-agent',USER_AGENT)]
 def safeOpen(url, data=None):
     ''' Retries opening URL until it opens successfully '''
     success = False
-    while success == False:
+    while not success:
         try:
             if data == None:
                 br.open(url)
@@ -131,12 +134,17 @@ def favoriteSong():
 
 def getContent():
     soup = BeautifulSoup(br.response().read())
-    items = soup.findAll('td', limit=2)
-    print items[1]
-    return items[1]
+    items = soup.findAll('td', limit=3)
+    return items
+
+def getSongInfo():
+    return getContent()[1]
+
+def getSongStats():
+    return getContent()[2]
 
 def outputSongInfo():
-    text = getContent()
+    text = getSongInfo()
     data = ''.join(text.findAll(text=True)).partition('favourites')
     data = (data[0]+data[1]).strip()
     data = data.replace('\t\t\t\t','')
@@ -171,7 +179,8 @@ def findSoupItemById(tagName, desiredId):
     soup = BeautifulSoup(br.response().read())
     return soup.find(tagName, attrs={'id' : desiredId})
 
-def getSeconds():
+def getSecondsFromPage():
+    ''' Gets the number of seconds a song has been playing from the page '''
     timeSpan = findSoupItemById('span','np_timer')
     return int(timeSpan['rel'])
 
@@ -196,60 +205,61 @@ def getSecondsUntilTomorrow(currentTime):
     return delta.seconds
 
 # main (infinite) loop
-while(True):
-    currentTime = datetime.datetime.now()
-    while(canRate(currentTime)):
-        safeOpen(SONG_URL)
-        try:
-            br.select_form(nr=0)
-        except:
-            # if a form can't be selected, the browser isn't logged in
-            login()
-            safeOpen(SONG_URL)
-            br.select_form(nr=0)
-        seconds = getSeconds()
-        if seconds <= 45:
-            # if <= 30, rate and set timer to timer + ~10
-            if not (songHasBeenRated()):
-                soup = BeautifulSoup(br.response().read())
-                items = soup.findAll('td', limit=3)
-                text = items[2]
-                rating = text.contents[5].strip().strip('Rating: ')
-                currentRating = rating.split('/', 1)[0]
-                rates = rating.split('rate', 1)[0]
-                rates = rates.split('(')[1]
-
-                myRating = generateRating(currentRating, rates)
-
-                print outputSongInfo()
-                print 'My Rating: %d' % myRating
-
-                br['rating'] = [str(myRating)]
-                br.submit()
-
-                # if song is above rating threshold, add it to favorites
-                if (myRating >= 9):
-                    favoriteSong()
-
-            else:
-                rating = br['rating'][0]
-                print outputSongInfo()
-                print 'Already rated this song: %s' % rating
-                # if song is above rating threshold, add it to favorites
-                if (float(rating) >= 9):
-                    favoriteSong()
-
-            seconds = seconds + random.randint(5,15)
-            print 'Sleeping for %d seconds...' % (seconds)
-            time.sleep(seconds)
-        else:
-            # if > 30, set timer to timer - ~20
-            seconds = seconds - random.randint(15,45)
-            print 'Sleeping for %d seconds...' % (seconds)
-            time.sleep(seconds)
+def main():
+    while(True):
+        # get current time at the start to try to avoid race conditions
         currentTime = datetime.datetime.now()
+        while(canRate(currentTime)):
+            safeOpen(SONG_URL)
+            try:
+                br.select_form(nr=0)
+            except:
+                login() # if a form can't be selected, the browser isn't logged in
+                safeOpen(SONG_URL)
+                br.select_form(nr=0)
+            seconds = getSecondsFromPage()
+            if seconds <= 45:
+                # if <= 45, print the song info, then check if the song has been rated
+                print outputSongInfo()
+                if not (songHasBeenRated()):
+                    # if it hasn't, rate the song
+                    text = getSongStats()
+                    rating = text.contents[5].strip().strip('Rating: ')
+                    currentRating = rating.split('/', 1)[0]
+                    rates = rating.split('rate', 1)[0]
+                    rates = rates.split('(')[1]
 
-    sleepTime = getSecondsUntilTomorrow(currentTime)
-    print 'Sleeping for %d hours, %d minutes...' % ((sleepTime / 3600), ((sleepTime % 3600)/ 60))
-    time.sleep(sleepTime)
+                    myRating = generateRating(currentRating, rates)
 
+                    print 'My Rating: %d' % myRating
+
+                    br['rating'] = [str(myRating)]
+                    br.submit()
+
+                    # if song is above rating threshold, add it to favorites
+                    if (myRating >= 9):
+                        favoriteSong()
+
+                else:
+                    rating = br['rating'][0]
+                    print 'Already rated this song: %s' % rating
+                    # if song is above rating threshold, add it to favorites
+                    if (float(rating) >= 9):
+                        favoriteSong()
+
+                seconds = seconds + random.randint(5,15)
+                print 'Sleeping for %d seconds...' % (seconds)
+                time.sleep(seconds)
+            else:
+                # if > 30, set timer to timer - ~20 seconds
+                seconds = seconds - random.randint(15,45)
+                print 'Sleeping for %d seconds...' % (seconds)
+                time.sleep(seconds)
+            currentTime = datetime.datetime.now()
+
+        sleepTime = getSecondsUntilTomorrow(currentTime)
+        print 'Sleeping for %d hours, %d minutes...' % ((sleepTime / 3600), ((sleepTime % 3600)/ 60))
+        time.sleep(sleepTime)
+
+if __name__ == "__main__":
+    main()
